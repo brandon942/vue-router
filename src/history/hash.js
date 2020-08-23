@@ -69,7 +69,7 @@ export class HashHistory extends History {
     )
   }
 
-  replace (location: RawLocation, onComplete?: Function, onAbort?: Function) {
+  replace (location: RawLocation, onComplete?: Function, onAbort?: Function, toForceReloadRoute?: Boolean) {
     const { current: fromRoute } = this
     this.transitionTo(
       location,
@@ -78,7 +78,7 @@ export class HashHistory extends History {
         handleScroll(this.router, route, fromRoute, false)
         onComplete && onComplete(route)
       },
-      onAbort
+      onAbort, toForceReloadRoute
     )
   }
 

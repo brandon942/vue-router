@@ -1,6 +1,8 @@
 import { warn } from '../util/warn'
 import { extend } from '../util/misc'
 
+var keyCounter = 0 // needed to force-reload a rendered component when desired by setting a different key
+
 export default {
   name: 'RouterView',
   functional: true,
@@ -12,7 +14,8 @@ export default {
   },
   render (_, { props, children, parent, data }) {
     // used by devtools to display a router-view badge
-    data.routerView = true
+	data.routerView = true
+	
 
     // directly use parent context's createElement() function
     // so that components rendered by router-view can resolve named slots
@@ -35,7 +38,16 @@ export default {
       }
       parent = parent.$parent
     }
-    data.routerViewDepth = depth
+	data.routerViewDepth = depth
+	
+	
+    const matched = route.matched[depth]
+	const component = matched && matched.components[name]
+
+	if(matched.reload) {
+		matched.reload = null // reset again because this flag only targets the next render
+		data.key = (++keyCounter)+"" // component can be reloaded by setting a different key
+	}
 
     // render previous view if the tree is inactive and kept-alive
     if (inactive) {
@@ -46,7 +58,8 @@ export default {
         // pass props
         if (cachedData.configProps) {
           fillPropsinData(cachedComponent, data, cachedData.route, cachedData.configProps)
-        }
+		}
+		
         return h(cachedComponent, data, children)
       } else {
         // render previous empty view
@@ -54,8 +67,6 @@ export default {
       }
     }
 
-    const matched = route.matched[depth]
-    const component = matched && matched.components[name]
 
     // render empty node if no matched route or no config component
     if (!matched || !component) {
@@ -105,7 +116,8 @@ export default {
       })
       fillPropsinData(component, data, route, configProps)
     }
-
+	
+	
     return h(component, data, children)
   }
 }

@@ -26,14 +26,14 @@ export class AbstractHistory extends History {
     )
   }
 
-  replace (location: RawLocation, onComplete?: Function, onAbort?: Function) {
+  replace (location: RawLocation, onComplete?: Function, onAbort?: Function, toForceReloadRoute?: Boolean) {
     this.transitionTo(
       location,
       route => {
         this.stack = this.stack.slice(0, this.index).concat(route)
         onComplete && onComplete(route)
       },
-      onAbort
+      onAbort, toForceReloadRoute
     )
   }
 

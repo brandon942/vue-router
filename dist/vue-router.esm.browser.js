@@ -24,6 +24,8 @@ function extend (a, b) {
   return a
 }
 
+var keyCounter = 0; // needed to force-reload a rendered component when desired by setting a different key
+
 var View = {
   name: 'RouterView',
   functional: true,
@@ -35,7 +37,8 @@ var View = {
   },
   render (_, { props, children, parent, data }) {
     // used by devtools to display a router-view badge
-    data.routerView = true;
+	data.routerView = true;
+	
 
     // directly use parent context's createElement() function
     // so that components rendered by router-view can resolve named slots
@@ -58,7 +61,16 @@ var View = {
       }
       parent = parent.$parent;
     }
-    data.routerViewDepth = depth;
+	data.routerViewDepth = depth;
+	
+	
+    const matched = route.matched[depth];
+	const component = matched && matched.components[name];
+
+	if(matched.reload) {
+		matched.reload = null; // reset again because this flag only targets the next render
+		data.key = (++keyCounter)+""; // component can be reloaded by setting a different key
+	}
 
     // render previous view if the tree is inactive and kept-alive
     if (inactive) {
@@ -69,7 +81,8 @@ var View = {
         // pass props
         if (cachedData.configProps) {
           fillPropsinData(cachedComponent, data, cachedData.route, cachedData.configProps);
-        }
+		}
+		
         return h(cachedComponent, data, children)
       } else {
         // render previous empty view
@@ -77,8 +90,6 @@ var View = {
       }
     }
 
-    const matched = route.matched[depth];
-    const component = matched && matched.components[name];
 
     // render empty node if no matched route or no config component
     if (!matched || !component) {
@@ -128,7 +139,8 @@ var View = {
       });
       fillPropsinData(component, data, route, configProps);
     }
-
+	
+	
     return h(component, data, children)
   }
 };
@@ -1012,191 +1024,239 @@ function normalizeLocation (
 const toTypes = [String, Object];
 const eventTypes = [String, Array];
 
-const noop = () => {};
+const noop = () => { };
 
-var Link = {
-  name: 'RouterLink',
-  props: {
-    to: {
-      type: toTypes,
-      required: true
-    },
-    tag: {
-      type: String,
-      default: 'a'
-    },
-    exact: Boolean,
-    append: Boolean,
-    replace: Boolean,
-    activeClass: String,
-    exactActiveClass: String,
-    ariaCurrentValue: {
-      type: String,
-      default: 'page'
-    },
-    event: {
-      type: eventTypes,
-      default: 'click'
-    }
-  },
-  render (h) {
-    const router = this.$router;
-    const current = this.$route;
-    const { location, route, href } = router.resolve(
-      this.to,
-      current,
-      this.append
-    );
+function initRoute(instance){ // init route variabls
+	const current = instance.$route;
+	const router = instance.$router;
+	const resolved = instance.rr = router.resolve(
+		instance.to,
+		current,
+		instance.append
+	);
+	const { route } = resolved;
+	const compareTarget = route.redirectedFrom
+		? createRoute(null, normalizeLocation(route.redirectedFrom), null, router)
+		: route;
 
-    const classes = {};
-    const globalActiveClass = router.options.linkActiveClass;
-    const globalExactActiveClass = router.options.linkExactActiveClass;
-    // Support global empty active class
-    const activeClassFallback =
-      globalActiveClass == null ? 'router-link-active' : globalActiveClass;
-    const exactActiveClassFallback =
-      globalExactActiveClass == null
-        ? 'router-link-exact-active'
-        : globalExactActiveClass;
-    const activeClass =
-      this.activeClass == null ? activeClassFallback : this.activeClass;
-    const exactActiveClass =
-      this.exactActiveClass == null
-        ? exactActiveClassFallback
-        : this.exactActiveClass;
-
-    const compareTarget = route.redirectedFrom
-      ? createRoute(null, normalizeLocation(route.redirectedFrom), null, router)
-      : route;
-
-    classes[exactActiveClass] = isSameRoute(current, compareTarget);
-    classes[activeClass] = this.exact
-      ? classes[exactActiveClass]
-      : isIncludedRoute(current, compareTarget);
-
-    const ariaCurrentValue = classes[exactActiveClass] ? this.ariaCurrentValue : null;
-
-    const handler = e => {
-      if (guardEvent(e)) {
-        if (this.replace) {
-          router.replace(location, noop);
-        } else {
-          router.push(location, noop);
-        }
-      }
-    };
-
-    const on = { click: guardEvent };
-    if (Array.isArray(this.event)) {
-      this.event.forEach(e => {
-        on[e] = handler;
-      });
-    } else {
-      on[this.event] = handler;
-    }
-
-    const data = { class: classes };
-
-    const scopedSlot =
-      !this.$scopedSlots.$hasNormal &&
-      this.$scopedSlots.default &&
-      this.$scopedSlots.default({
-        href,
-        route,
-        navigate: handler,
-        isActive: classes[activeClass],
-        isExactActive: classes[exactActiveClass]
-      });
-
-    if (scopedSlot) {
-      if (scopedSlot.length === 1) {
-        return scopedSlot[0]
-      } else if (scopedSlot.length > 1 || !scopedSlot.length) {
-        {
-          warn(
-            false,
-            `RouterLink with to="${
-              this.to
-            }" is trying to use a scoped slot but it didn't provide exactly one child. Wrapping the content with a span element.`
-          );
-        }
-        return scopedSlot.length === 0 ? h() : h('span', {}, scopedSlot)
-      }
-    }
-
-    if (this.tag === 'a') {
-      data.on = on;
-      data.attrs = { href, 'aria-current': ariaCurrentValue };
-    } else {
-      // find the first <a> child and apply listener and href
-      const a = findAnchor(this.$slots.default);
-      if (a) {
-        // in case the <a> is a static node
-        a.isStatic = false;
-        const aData = (a.data = extend({}, a.data));
-        aData.on = aData.on || {};
-        // transform existing events in both objects into arrays so we can push later
-        for (const event in aData.on) {
-          const handler = aData.on[event];
-          if (event in on) {
-            aData.on[event] = Array.isArray(handler) ? handler : [handler];
-          }
-        }
-        // append new listeners for router-link
-        for (const event in on) {
-          if (event in aData.on) {
-            // on[event] is always a function
-            aData.on[event].push(on[event]);
-          } else {
-            aData.on[event] = handler;
-          }
-        }
-
-        const aAttrs = (a.data.attrs = extend({}, a.data.attrs));
-        aAttrs.href = href;
-        aAttrs['aria-current'] = ariaCurrentValue;
-      } else {
-        // doesn't have <a> child, apply listener to self
-        data.on = on;
-      }
-    }
-
-    return h(this.tag, data, this.$slots.default)
-  }
-};
-
-function guardEvent (e) {
-  // don't redirect with control keys
-  if (e.metaKey || e.altKey || e.ctrlKey || e.shiftKey) return
-  // don't redirect when preventDefault called
-  if (e.defaultPrevented) return
-  // don't redirect on right click
-  if (e.button !== undefined && e.button !== 0) return
-  // don't redirect if `target="_blank"`
-  if (e.currentTarget && e.currentTarget.getAttribute) {
-    const target = e.currentTarget.getAttribute('target');
-    if (/\b_blank\b/i.test(target)) return
-  }
-  // this may be a Weex event which doesn't have this method
-  if (e.preventDefault) {
-    e.preventDefault();
-  }
-  return true
+	const _isSameRoute = isSameRoute(current, compareTarget);
+	instance._sr = _isSameRoute;
+	instance._icr = isIncludedRoute(current, compareTarget);
 }
 
-function findAnchor (children) {
-  if (children) {
-    let child;
-    for (let i = 0; i < children.length; i++) {
-      child = children[i];
-      if (child.tag === 'a') {
-        return child
-      }
-      if (child.children && (child = findAnchor(child.children))) {
-        return child
-      }
-    }
-  }
+function Init(instance){
+	const router = instance.$router;
+	
+	initRoute(instance); // init route variables
+
+	const classes = {};
+	const globalActiveClass = router.options.linkActiveClass;
+	const globalExactActiveClass = router.options.linkExactActiveClass;
+	// Support global empty active class
+	const activeClassFallback =
+		globalActiveClass == null ? 'router-link-active' : globalActiveClass;
+	const exactActiveClassFallback =
+		globalExactActiveClass == null
+			? 'router-link-exact-active'
+			: globalExactActiveClass;
+	const activeClass =
+		instance.activeClass == null ? activeClassFallback : instance.activeClass;
+	const exactActiveClass =
+		instance.exactActiveClass == null
+			? exactActiveClassFallback
+			: instance.exactActiveClass;
+
+
+
+	const handler = e => {
+		const { location, route } = instance.rr;
+		const _isSameRoute = instance._sr;
+		const toForceRefresh = instance.refresh && _isSameRoute;
+		if (guardEvent(e)) {
+			if (instance.replace || _isSameRoute) {
+				router.replace(location, noop, null, toForceRefresh);
+			} else {
+				router.push(location, noop);
+			}
+		}
+	};
+
+	const on = { click: guardEvent };
+	if (Array.isArray(instance.event)) {
+		instance.event.forEach(e => {
+			on[e] = handler;
+		});
+	} else {
+		on[instance.event] = handler;
+	}
+
+	const data = { class: classes };
+
+
+	let attributes = {};
+	if (instance.tag === 'a') {
+		data.on = on;
+		data.attrs = attributes;
+	} else {
+		// find the first <a> child and apply listener and href
+		const a = findAnchor(instance.$slots.default);
+		if (a) {
+			// in case the <a> is a static node
+			a.isStatic = false;
+			const aData = (a.data = extend({}, a.data));
+			aData.on = aData.on || {};
+			// transform existing events in both objects into arrays so we can push later
+			for (const event in aData.on) {
+				const handler = aData.on[event];
+				if (event in on) {
+					aData.on[event] = Array.isArray(handler) ? handler : [handler];
+				}
+			}
+			// append new listeners for router-link
+			for (const event in on) {
+				if (event in aData.on) {
+					// on[event] is always a function
+					aData.on[event].push(on[event]);
+				} else {
+					aData.on[event] = handler;
+				}
+			}
+
+			a.data.attrs = attributes;
+		} else {
+			// doesn't have <a> child, apply listener to self
+			data.on = on;
+		}
+	}
+	
+	
+	instance._ac = activeClass;
+	instance._eac = exactActiveClass;
+	instance._cl = classes;
+	instance.hn = handler;
+	instance._att = attributes;
+	instance._dat = data;  // also serves as the initialized flag
+}
+
+
+
+var Link = {
+	name: 'RouterLink',
+	props: {
+		to: {
+			type: toTypes,
+			required: true
+		},
+		tag: {
+			type: String,
+			default: 'a'
+		},
+		exact: Boolean,
+		refresh: Boolean, // If truthy, then the link always reloads the route (default: false = navigation is aborted if the route is the same)
+		append: Boolean,
+		replace: Boolean,
+		activeClass: String,
+		exactActiveClass: String,
+		ariaCurrentValue: {
+			type: String,
+			default: 'page'
+		},
+		event: {
+			type: eventTypes,
+			default: 'click'
+		}
+	},
+	watch: {
+		to()	{
+			initRoute(this);
+		}
+	},
+	render(h) {
+		if(!this._dat) Init(this); // init
+		
+		
+		const { location, route, href } = this.rr;
+
+		const isIncludedRoute = this._icr;
+		const _isSameRoute = this._sr;
+		
+		var classes = this._cl;
+		var exactActiveClass = this._eac;
+		var activeClass = this._ac;
+		classes[exactActiveClass] = _isSameRoute;
+		classes[activeClass] = this.exact
+			? classes[exactActiveClass]
+			: isIncludedRoute;
+
+		const ariaCurrentValue = classes[exactActiveClass] ? this.ariaCurrentValue : null;
+		
+		var attrs = this._att;
+		attrs['aria-current'] = ariaCurrentValue;
+		attrs.href = href;
+
+		
+		const scopedSlot =
+			!this.$scopedSlots.$hasNormal &&
+			this.$scopedSlots.default &&
+			this.$scopedSlots.default({
+				href,
+				route,
+				navigate: this.hn,
+				isActive: classes[activeClass],
+				isExactActive: classes[exactActiveClass]
+			});
+		if (scopedSlot) {
+			if (scopedSlot.length === 1) {
+				return scopedSlot[0]
+			} else if (scopedSlot.length > 1 || !scopedSlot.length) {
+				{
+					warn(
+						false,
+						`RouterLink with to="${
+						this.to
+						}" is trying to use a scoped slot but it didn't provide exactly one child. Wrapping the content with a span element.`
+					);
+				}
+				return scopedSlot.length === 0 ? h() : h('span', {}, scopedSlot)
+			}
+		}
+
+		return h(this.tag, this._dat, this.$slots.default)
+	}
+};
+
+function guardEvent(e) {
+	// don't redirect with control keys
+	if (e.metaKey || e.altKey || e.ctrlKey || e.shiftKey) return
+	// don't redirect when preventDefault called
+	if (e.defaultPrevented) return
+	// don't redirect on right click
+	if (e.button !== undefined && e.button !== 0) return
+	// don't redirect if `target="_blank"`
+	if (e.currentTarget && e.currentTarget.getAttribute) {
+		const target = e.currentTarget.getAttribute('target');
+		if (/\b_blank\b/i.test(target)) return
+	}
+	// this may be a Weex event which doesn't have this method
+	if (e.preventDefault) {
+		e.preventDefault();
+	}
+	return true
+}
+
+function findAnchor(children) {
+	if (children) {
+		let child;
+		for (let i = 0; i < children.length; i++) {
+			child = children[i];
+			if (child.tag === 'a') {
+				return child
+			}
+			if (child.children && (child = findAnchor(child.children))) {
+				return child
+			}
+		}
+	}
 }
 
 let _Vue;
@@ -1885,6 +1945,7 @@ function runQueue (queue, fn, cb) {
   step(0);
 }
 
+// When changing thing, also edit router.d.ts
 const NavigationFailureType = {
   redirected: 2,
   aborted: 4,
@@ -2101,234 +2162,251 @@ class History {
   
 
   constructor (router, base) {
-    this.router = router;
-    this.base = normalizeBase(base);
-    // start with a route object that stands for "nowhere"
-    this.current = START;
-    this.pending = null;
-    this.ready = false;
-    this.readyCbs = [];
-    this.readyErrorCbs = [];
-    this.errorCbs = [];
-    this.listeners = [];
+	this.router = router;
+	this.base = normalizeBase(base);
+	// start with a route object that stands for "nowhere"
+	this.current = START;
+	this.pending = null;
+	this.ready = false;
+	this.readyCbs = [];
+	this.readyErrorCbs = [];
+	this.errorCbs = [];
+	this.listeners = [];
   }
 
   listen (cb) {
-    this.cb = cb;
+	this.cb = cb;
   }
 
   onReady (cb, errorCb) {
-    if (this.ready) {
-      cb();
-    } else {
-      this.readyCbs.push(cb);
-      if (errorCb) {
-        this.readyErrorCbs.push(errorCb);
-      }
-    }
+	if (this.ready) {
+	  cb();
+	} else {
+	  this.readyCbs.push(cb);
+	  if (errorCb) {
+		this.readyErrorCbs.push(errorCb);
+	  }
+	}
   }
 
   onError (errorCb) {
-    this.errorCbs.push(errorCb);
+	this.errorCbs.push(errorCb);
   }
 
   transitionTo (
-    location,
-    onComplete,
-    onAbort
+	location,
+	onComplete,
+	onAbort,
+	toForceReloadRoute
   ) {
-    let route;
-    // catch redirect option https://github.com/vuejs/vue-router/issues/3201
-    try {
-      route = this.router.match(location, this.current);
-    } catch (e) {
-      this.errorCbs.forEach(cb => {
-        cb(e);
-      });
-      // Exception should still be thrown
-      throw e
-    }
-    this.confirmTransition(
-      route,
-      () => {
-        const prev = this.current;
-        this.updateRoute(route);
-        onComplete && onComplete(route);
-        this.ensureURL();
-        this.router.afterHooks.forEach(hook => {
-          hook && hook(route, prev);
-        });
+	let route;
+	// catch redirect option https://github.com/vuejs/vue-router/issues/3201
+	try {
+	  route = this.router.match(location, this.current);
+	} catch (e) {
+	  this.errorCbs.forEach(cb => {
+		cb(e);
+	  });
+	  // Exception should still be thrown
+	  throw e
+	}
+	this.confirmTransition(
+	  route,
+	  () => {
+		const prev = this.current;
+		this.updateRoute(route);
+		onComplete && onComplete(route);
+		this.ensureURL();
+		this.router.afterHooks.forEach(hook => {
+		  hook && hook(route, prev);
+		});
 
-        // fire ready cbs once
-        if (!this.ready) {
-          this.ready = true;
-          this.readyCbs.forEach(cb => {
-            cb(route);
-          });
-        }
-      },
-      err => {
-        if (onAbort) {
-          onAbort(err);
-        }
-        if (err && !this.ready) {
-          this.ready = true;
-          // Initial redirection should still trigger the onReady onSuccess
-          // https://github.com/vuejs/vue-router/issues/3225
-          if (!isNavigationFailure(err, NavigationFailureType.redirected)) {
-            this.readyErrorCbs.forEach(cb => {
-              cb(err);
-            });
-          } else {
-            this.readyCbs.forEach(cb => {
-              cb(route);
-            });
-          }
-        }
-      }
-    );
+		// fire ready cbs once
+		if (!this.ready) {
+		  this.ready = true;
+		  this.readyCbs.forEach(cb => {
+			cb(route);
+		  });
+		}
+	  },
+	  err => {
+		if (onAbort) {
+		  onAbort(err);
+		}
+		if (err && !this.ready) {
+		  this.ready = true;
+		  // Initial redirection should still trigger the onReady onSuccess
+		  // https://github.com/vuejs/vue-router/issues/3225
+		  if (!isNavigationFailure(err, NavigationFailureType.redirected)) {
+			this.readyErrorCbs.forEach(cb => {
+			  cb(err);
+			});
+		  } else {
+			this.readyCbs.forEach(cb => {
+			  cb(route);
+			});
+		  }
+		}
+	  },
+	  toForceReloadRoute
+	);
   }
 
-  confirmTransition (route, onComplete, onAbort) {
-    const current = this.current;
-    const abort = err => {
-      // changed after adding errors with
-      // https://github.com/vuejs/vue-router/pull/3047 before that change,
-      // redirect and aborted navigation would produce an err == null
-      if (!isNavigationFailure(err) && isError(err)) {
-        if (this.errorCbs.length) {
-          this.errorCbs.forEach(cb => {
-            cb(err);
-          });
-        } else {
-          warn(false, 'uncaught error during route navigation:');
-          console.error(err);
-        }
-      }
-      onAbort && onAbort(err);
-    };
-    const lastRouteIndex = route.matched.length - 1;
-    const lastCurrentIndex = current.matched.length - 1;
-    if (
-      isSameRoute(route, current) &&
-      // in the case the route map has been dynamically appended to
-      lastRouteIndex === lastCurrentIndex &&
-      route.matched[lastRouteIndex] === current.matched[lastCurrentIndex]
-    ) {
-      this.ensureURL();
-      return abort(createNavigationDuplicatedError(current, route))
-    }
+  confirmTransition (route, onComplete, onAbort, toForceReloadRoute) {
+	const current = this.current;
+	const abort = err => {
+		// unset target route reload flag if aborted - the forced reload is link specific or the flag is set programmatically
+		if(toForceReloadRoute) {
+			targetRoute.reload = null;
+		}
+		
+		// changed after adding errors with
+		// https://github.com/vuejs/vue-router/pull/3047 before that change,
+		// redirect and aborted navigation would produce an err == null
+		if (!isNavigationFailure(err) && isError(err)) {
+			if (this.errorCbs.length) {
+			this.errorCbs.forEach(cb => {
+				cb(err);
+			});
+			} else {
+			warn(false, 'uncaught error during route navigation:');
+			console.error(err);
+			}
+		}
+		onAbort && onAbort(err);
+	};
+	const lastRouteIndex = route.matched.length - 1;
+	const lastCurrentIndex = current.matched.length - 1;
+	const targetRoute = route.matched[lastRouteIndex];
+	const currentRoute = current.matched[lastCurrentIndex];
+	const isSameRoute_ = isSameRoute(route, current) 
+							// in the case the route map has been dynamically appended to
+							&& lastRouteIndex === lastCurrentIndex
+							&& targetRoute === currentRoute;
+	if (isSameRoute_) {
+		if (toForceReloadRoute) {
+			// set the reload flag to force-reload the route-view component 
+			// Only the target route component should be reloaded, all components of matched parent routes stay unaffected
+			// cannot unset again here because render is done asynchronously.
+			targetRoute.reload = 1; // It is unset again in the route-view render function, or when the navigation is aborted
+		} else { 
+			// if same route and no refresh is wanted then abort
+			this.ensureURL();
+			return abort(createNavigationDuplicatedError(current, route))
+		}
+	}
 
-    const { updated, deactivated, activated } = resolveQueue(
-      this.current.matched,
-      route.matched
-    );
+	const { updated, deactivated, activated } = resolveQueue(
+	  this.current.matched,
+	  route.matched,
+	  toForceReloadRoute
+	);
 
-    const queue = [].concat(
-      // in-component leave guards
-      extractLeaveGuards(deactivated),
-      // global before hooks
-      this.router.beforeHooks,
-      // in-component update hooks
-      extractUpdateHooks(updated),
-      // in-config enter guards
-      activated.map(m => m.beforeEnter),
-      // async components
-      resolveAsyncComponents(activated)
-    );
+	const queue = [].concat(
+	  // in-component leave guards
+	  extractLeaveGuards(deactivated),
+	  // global before hooks
+	  this.router.beforeHooks,
+	  // in-component update hooks
+	  extractUpdateHooks(updated),
+	  // in-config enter guards
+	  activated.map(m => m.beforeEnter),
+	  // async components
+	  resolveAsyncComponents(activated)
+	);
 
-    this.pending = route;
-    const iterator = (hook, next) => {
-      if (this.pending !== route) {
-        return abort(createNavigationCancelledError(current, route))
-      }
-      try {
-        hook(route, current, (to) => {
-          if (to === false) {
-            // next(false) -> abort navigation, ensure current URL
-            this.ensureURL(true);
-            abort(createNavigationAbortedError(current, route));
-          } else if (isError(to)) {
-            this.ensureURL(true);
-            abort(to);
-          } else if (
-            typeof to === 'string' ||
-            (typeof to === 'object' &&
-              (typeof to.path === 'string' || typeof to.name === 'string'))
-          ) {
-            // next('/') or next({ path: '/' }) -> redirect
-            abort(createNavigationRedirectedError(current, route));
-            if (typeof to === 'object' && to.replace) {
-              this.replace(to);
-            } else {
-              this.push(to);
-            }
-          } else {
-            // confirm transition and pass on the value
-            next(to);
-          }
-        });
-      } catch (e) {
-        abort(e);
-      }
-    };
+	this.pending = route;
+	const iterator = (hook, next) => {
+	  if (this.pending !== route) {
+		return abort(createNavigationCancelledError(current, route))
+	  }
+	  try {
+		hook(route, current, (to) => {
+		  if (to === false) {
+			// next(false) -> abort navigation, ensure current URL
+			this.ensureURL(true);
+			abort(createNavigationAbortedError(current, route));
+		  } else if (isError(to)) {
+			this.ensureURL(true);
+			abort(to);
+		  } else if (
+			typeof to === 'string' ||
+			(typeof to === 'object' &&
+			  (typeof to.path === 'string' || typeof to.name === 'string'))
+		  ) {
+			// next('/') or next({ path: '/' }) -> redirect
+			abort(createNavigationRedirectedError(current, route));
+			if (typeof to === 'object' && to.replace) {
+			  this.replace(to);
+			} else {
+			  this.push(to);
+			}
+		  } else {
+			// confirm transition and pass on the value
+			next(to);
+		  }
+		});
+	  } catch (e) {
+		abort(e);
+	  }
+	};
 
-    runQueue(queue, iterator, () => {
-      const postEnterCbs = [];
-      const isValid = () => this.current === route;
-      // wait until async components are resolved before
-      // extracting in-component enter guards
-      const enterGuards = extractEnterGuards(activated, postEnterCbs, isValid);
-      const queue = enterGuards.concat(this.router.resolveHooks);
-      runQueue(queue, iterator, () => {
-        if (this.pending !== route) {
-          return abort(createNavigationCancelledError(current, route))
-        }
-        this.pending = null;
-        onComplete(route);
-        if (this.router.app) {
-          this.router.app.$nextTick(() => {
-            postEnterCbs.forEach(cb => {
-              cb();
-            });
-          });
-        }
-      });
-    });
+	runQueue(queue, iterator, () => {
+	  const postEnterCbs = [];
+	  const isValid = () => this.current === route;
+	  // wait until async components are resolved before
+	  // extracting in-component enter guards
+	  const enterGuards = extractEnterGuards(activated, postEnterCbs, isValid);
+	  const queue = enterGuards.concat(this.router.resolveHooks);
+	  runQueue(queue, iterator, () => {
+		if (this.pending !== route) {
+		  return abort(createNavigationCancelledError(current, route))
+		}
+		this.pending = null;
+		onComplete(route);
+		if (this.router.app) {
+		  this.router.app.$nextTick(() => {
+			postEnterCbs.forEach(cb => {
+			  cb();
+			});
+		  });
+		}
+	  });
+	});
   }
 
   updateRoute (route) {
-    this.current = route;
-    this.cb && this.cb(route);
+	this.current = route;
+	this.cb && this.cb(route);
   }
 
   setupListeners () {
-    // Default implementation is empty
+	// Default implementation is empty
   }
 
   teardownListeners () {
-    this.listeners.forEach(cleanupListener => {
-      cleanupListener();
-    });
-    this.listeners = [];
+	this.listeners.forEach(cleanupListener => {
+	  cleanupListener();
+	});
+	this.listeners = [];
   }
 }
 
 function normalizeBase (base) {
   if (!base) {
-    if (inBrowser) {
-      // respect <base> tag
-      const baseEl = document.querySelector('base');
-      base = (baseEl && baseEl.getAttribute('href')) || '/';
-      // strip full URL origin
-      base = base.replace(/^https?:\/\/[^\/]+/, '');
-    } else {
-      base = '/';
-    }
+	if (inBrowser) {
+	  // respect <base> tag
+	  const baseEl = document.querySelector('base');
+	  base = (baseEl && baseEl.getAttribute('href')) || '/';
+	  // strip full URL origin
+	  base = base.replace(/^https?:\/\/[^\/]+/, '');
+	} else {
+	  base = '/';
+	}
   }
   // make sure there's the starting slash
   if (base.charAt(0) !== '/') {
-    base = '/' + base;
+	base = '/' + base;
   }
   // remove trailing slash
   return base.replace(/\/$/, '')
@@ -2336,19 +2414,21 @@ function normalizeBase (base) {
 
 function resolveQueue (
   current,
-  next
+  next,
+  toForceReloadRoute
 ) {
   let i;
   const max = Math.max(current.length, next.length);
   for (i = 0; i < max; i++) {
-    if (current[i] !== next[i]) {
-      break
-    }
+	if (current[i] !== next[i]) {
+	  break
+	}
   }
+  if(i && toForceReloadRoute) --i; // the target route should not be updated, but reloaded
   return {
-    updated: next.slice(0, i),
-    activated: next.slice(i),
-    deactivated: current.slice(i)
+	updated: next.slice(0, i),
+	activated: next.slice(i),
+	deactivated: current.slice(i)
   }
 }
 
@@ -2359,12 +2439,12 @@ function extractGuards (
   reverse
 ) {
   const guards = flatMapComponents(records, (def, instance, match, key) => {
-    const guard = extractGuard(def, name);
-    if (guard) {
-      return Array.isArray(guard)
-        ? guard.map(guard => bind(guard, instance, match, key))
-        : bind(guard, instance, match, key)
-    }
+	const guard = extractGuard(def, name);
+	if (guard) {
+	  return Array.isArray(guard)
+		? guard.map(guard => bind(guard, instance, match, key))
+		: bind(guard, instance, match, key)
+	}
   });
   return flatten(reverse ? guards.reverse() : guards)
 }
@@ -2374,8 +2454,8 @@ function extractGuard (
   key
 ) {
   if (typeof def !== 'function') {
-    // extend now so that global mixins are applied.
-    def = _Vue.extend(def);
+	// extend now so that global mixins are applied.
+	def = _Vue.extend(def);
   }
   return def.options[key]
 }
@@ -2390,9 +2470,9 @@ function extractUpdateHooks (updated) {
 
 function bindGuard (guard, instance) {
   if (instance) {
-    return function boundRouteGuard () {
-      return guard.apply(instance, arguments)
-    }
+	return function boundRouteGuard () {
+	  return guard.apply(instance, arguments)
+	}
   }
 }
 
@@ -2402,11 +2482,11 @@ function extractEnterGuards (
   isValid
 ) {
   return extractGuards(
-    activated,
-    'beforeRouteEnter',
-    (guard, _, match, key) => {
-      return bindEnterGuard(guard, match, key, cbs, isValid)
-    }
+	activated,
+	'beforeRouteEnter',
+	(guard, _, match, key) => {
+	  return bindEnterGuard(guard, match, key, cbs, isValid)
+	}
   )
 }
 
@@ -2418,19 +2498,19 @@ function bindEnterGuard (
   isValid
 ) {
   return function routeEnterGuard (to, from, next) {
-    return guard(to, from, cb => {
-      if (typeof cb === 'function') {
-        cbs.push(() => {
-          // #750
-          // if a router-view is wrapped with an out-in transition,
-          // the instance may not have been registered at this time.
-          // we will need to poll for registration until current route
-          // is no longer valid.
-          poll(cb, match.instances, key, isValid);
-        });
-      }
-      next(cb);
-    })
+	return guard(to, from, cb => {
+	  if (typeof cb === 'function') {
+		cbs.push(() => {
+		  // #750
+		  // if a router-view is wrapped with an out-in transition,
+		  // the instance may not have been registered at this time.
+		  // we will need to poll for registration until current route
+		  // is no longer valid.
+		  poll(cb, match.instances, key, isValid);
+		});
+	  }
+	  next(cb);
+	})
   }
 }
 
@@ -2441,14 +2521,14 @@ function poll (
   isValid
 ) {
   if (
-    instances[key] &&
-    !instances[key]._isBeingDestroyed // do not reuse being destroyed instance
+	instances[key] &&
+	!instances[key]._isBeingDestroyed // do not reuse being destroyed instance
   ) {
-    cb(instances[key]);
+	cb(instances[key]);
   } else if (isValid()) {
-    setTimeout(() => {
-      poll(cb, instances, key, isValid);
-    }, 16);
+	setTimeout(() => {
+	  poll(cb, instances, key, isValid);
+	}, 16);
   }
 }
 
@@ -2511,13 +2591,13 @@ class HTML5History extends History {
     }, onAbort);
   }
 
-  replace (location, onComplete, onAbort) {
+  replace (location, onComplete, onAbort, toForceReloadRoute) {
     const { current: fromRoute } = this;
     this.transitionTo(location, route => {
       replaceState(cleanPath(this.base + route.fullPath));
       handleScroll(this.router, route, fromRoute, false);
       onComplete && onComplete(route);
-    }, onAbort);
+    }, onAbort, toForceReloadRoute);
   }
 
   ensureURL (push) {
@@ -2604,7 +2684,7 @@ class HashHistory extends History {
     );
   }
 
-  replace (location, onComplete, onAbort) {
+  replace (location, onComplete, onAbort, toForceReloadRoute) {
     const { current: fromRoute } = this;
     this.transitionTo(
       location,
@@ -2613,7 +2693,7 @@ class HashHistory extends History {
         handleScroll(this.router, route, fromRoute, false);
         onComplete && onComplete(route);
       },
-      onAbort
+      onAbort, toForceReloadRoute
     );
   }
 
@@ -2722,14 +2802,14 @@ class AbstractHistory extends History {
     );
   }
 
-  replace (location, onComplete, onAbort) {
+  replace (location, onComplete, onAbort, toForceReloadRoute) {
     this.transitionTo(
       location,
       route => {
         this.stack = this.stack.slice(0, this.index).concat(route);
         onComplete && onComplete(route);
       },
-      onAbort
+      onAbort, toForceReloadRoute
     );
   }
 
@@ -2925,14 +3005,14 @@ class VueRouter {
     }
   }
 
-  replace (location, onComplete, onAbort) {
+  replace (location, onComplete, onAbort, toForceReloadRoute) {
     // $flow-disable-line
     if (!onComplete && !onAbort && typeof Promise !== 'undefined') {
       return new Promise((resolve, reject) => {
-        this.history.replace(location, resolve, reject);
+        this.history.replace(location, resolve, reject, toForceReloadRoute);
       })
     } else {
-      this.history.replace(location, onComplete, onAbort);
+      this.history.replace(location, onComplete, onAbort, toForceReloadRoute);
     }
   }
 

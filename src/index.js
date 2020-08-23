@@ -178,14 +178,14 @@ export default class VueRouter {
     }
   }
 
-  replace (location: RawLocation, onComplete?: Function, onAbort?: Function) {
+  replace (location: RawLocation, onComplete?: Function, onAbort?: Function, toForceReloadRoute?: Boolean) {
     // $flow-disable-line
     if (!onComplete && !onAbort && typeof Promise !== 'undefined') {
       return new Promise((resolve, reject) => {
-        this.history.replace(location, resolve, reject)
+        this.history.replace(location, resolve, reject, toForceReloadRoute)
       })
     } else {
-      this.history.replace(location, onComplete, onAbort)
+      this.history.replace(location, onComplete, onAbort, toForceReloadRoute)
     }
   }
 

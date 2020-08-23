@@ -64,13 +64,13 @@ export class HTML5History extends History {
     }, onAbort)
   }
 
-  replace (location: RawLocation, onComplete?: Function, onAbort?: Function) {
+  replace (location: RawLocation, onComplete?: Function, onAbort?: Function, toForceReloadRoute?: Boolean) {
     const { current: fromRoute } = this
     this.transitionTo(location, route => {
       replaceState(cleanPath(this.base + route.fullPath))
       handleScroll(this.router, route, fromRoute, false)
       onComplete && onComplete(route)
-    }, onAbort)
+    }, onAbort, toForceReloadRoute)
   }
 
   ensureURL (push?: boolean) {
