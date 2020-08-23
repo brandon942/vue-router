@@ -6,23 +6,5 @@
   "extends": [
     "plugin:vue-libs/recommended",
     "plugin:flowtype/recommended"
-  ],
-  "rules": {
-	  "no-mixed-spaces-and-tabs": "off",
-	  "indent":"off",
-	  "no-trailing-spaces":"off",
-	  "spaced-comment": "off",
-	  "operator-linebreak": "off",
-	  "keyword-spacing": "off",
-	  "no-multiple-empty-lines": "off",
-	  "quotes": "off",
-	  "space-infix-ops": "off",
-	  "space-before-blocks": "off",
-	  "prefer-const": "off",
-	  "semi": "off",
-	  "padded-blocks": "off",
-	  "brace-style": "off",
-	  "space-before-function-paren": "off",
-	  "no-unused-vars": "off"
-  }
+  ]
 }
